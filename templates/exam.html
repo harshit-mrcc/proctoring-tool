@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Exam | {{ username }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <a class="nav-link" href="/">Home</a>
+    </div>
+  </header>
+
+  <main class="container exam-layout">
+    <section class="exam-content">
+      <h1>Online Exam</h1>
+      <p class="subtitle">Candidate: <strong>{{ username }}</strong></p>
+
+      <form class="questions-card" id="examForm">
+        <div class="exam-head-row">
+          <h2>Sample Questions</h2>
+          <div id="examTimer" class="exam-timer">05:00</div>
+        </div>
+
+        <p id="questionStep" class="question-step">Question 1 of 10</p>
+        <div id="questionHost" class="question"></div>
+
+        <div class="question-nav">
+          <button id="prevBtn" type="button" class="btn">Previous</button>
+          <button id="nextBtn" type="button" class="btn btn-primary">Next</button>
+        </div>
+
+        <button id="endExamBtn" type="button" class="btn btn-danger exam-end-btn">End Exam</button>
+      </form>
+    </section>
+
+    <aside class="question-stats-widget" aria-label="Question Stats">
+      <strong>Progress</strong>
+      <div class="stats-line">
+        <span>Attempted</span>
+        <span id="attemptedCount" class="stats-value attempted">0</span>
+      </div>
+      <div class="stats-line">
+        <span>Unanswered</span>
+        <span id="unansweredCount" class="stats-value unanswered">10</span>
+      </div>
+    </aside>
+
+    <section class="monitor-widget" aria-label="Live Monitoring">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="captureCanvas" width="640" height="480" hidden></canvas>
+
+      <button id="violationsToggle" class="violations-toggle">Violations (0)</button>
+
+      <div id="violationsPanel" class="violations-panel hidden">
+        <div class="violations-head">
+          <strong>Live Violations</strong>
+          <span id="violationStatus" class="violation-status">Normal</span>
+        </div>
+        <div id="totals" class="totals"></div>
+        <ul id="reportList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <div id="warningToast" class="warning-toast hidden"></div>
+
+  <script>
+    const examUsername = {{ username | tojson }};
+    const fromSetup = {{ from_setup | tojson }};
+
+    const webcam = document.getElementById('webcam');
+    const canvas = document.getElementById('captureCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const toggleBtn = document.getElementById('violationsToggle');
+    const panel = document.getElementById('violationsPanel');
+    const violationStatusEl = document.getElementById('violationStatus');
+    const totalsEl = document.getElementById('totals');
+    const reportListEl = document.getElementById('reportList');
+
+    const questionStepEl = document.getElementById('questionStep');
+    const questionHostEl = document.getElementById('questionHost');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const endExamBtn = document.getElementById('endExamBtn');
+    const timerEl = document.getElementById('examTimer');
+    const attemptedCountEl = document.getElementById('attemptedCount');
+    const unansweredCountEl = document.getElementById('unansweredCount');
+    const warningToastEl = document.getElementById('warningToast');
+
+    const questions = [
+      { text: 'Which data structure uses FIFO order?', options: ['Stack', 'Queue', 'Tree'] },
+      { text: 'What is the output of 2 ** 3 in Python?', options: ['5', '6', '8'] },
+      { text: 'HTTP status code for success is:', options: ['200', '404', '500'] },
+      { text: 'Which keyword defines a function in Python?', options: ['func', 'define', 'def'] },
+      { text: 'Which protocol is used for secure web traffic?', options: ['HTTP', 'HTTPS', 'FTP'] },
+      { text: 'Which one is a mutable Python type?', options: ['tuple', 'list', 'str'] },
+      { text: 'What does CSS stand for?', options: ['Cascading Style Sheets', 'Creative Style Syntax', 'Computer Style System'] },
+      { text: 'Which SQL command retrieves data?', options: ['INSERT', 'UPDATE', 'SELECT'] },
+      { text: 'Which complexity is better for sorting large data?', options: ['O(n log n)', 'O(n^2)', 'O(2^n)'] },
+      { text: 'Which command creates a virtual environment in Python?', options: ['python -m venv .venv', 'pip install venv', 'python create venv'] },
+    ];
+
+    const answers = new Array(questions.length).fill(null);
+    let currentQuestionIndex = 0;
+    let examEnded = false;
+    let remainingSeconds = 5 * 60;
+    let timerId = null;
+    let monitorIntervalId = null;
+    const recentViolationAt = {};
+
+    const violationCounters = {
+      no_face: 0,
+      multiple_faces: 0,
+      looking_sideways: 0,
+      identity_mismatch: 0,
+      low_lighting: 0,
+      phone_visible: 0,
+      tab_hidden: 0,
+      window_blur: 0,
+      fullscreen_exit: 0,
+      navigation_attempt: 0,
+      reload_or_close_attempt: 0,
+      monitor_error: 0,
+    };
+
+    function totalViolationCount() {
+      return Object.values(violationCounters).reduce((sum, count) => sum + count, 0);
+    }
+
+    function showWarningToast(message) {
+      warningToastEl.textContent = message;
+      warningToastEl.classList.remove('hidden');
+      clearTimeout(showWarningToast._timer);
+      showWarningToast._timer = setTimeout(() => {
+        warningToastEl.classList.add('hidden');
+      }, 3200);
+    }
+
+    function updateTotals() {
+      const chips = Object.entries(violationCounters)
+        .map(([name, count]) => `<span class="total-chip">${name}: ${count}</span>`)
+        .join('');
+      totalsEl.innerHTML = chips;
+      toggleBtn.textContent = `Violations (${totalViolationCount()})`;
+      setViolationState(totalViolationCount() > 0);
+    }
+
+    function addReportEntry(text) {
+      const item = document.createElement('li');
+      item.textContent = text;
+      reportListEl.prepend(item);
+      while (reportListEl.children.length > 60) {
+        reportListEl.removeChild(reportListEl.lastChild);
+      }
+    }
+
+    function setViolationState(hasViolation) {
+      toggleBtn.classList.toggle('has-violation', hasViolation);
+      violationStatusEl.textContent = hasViolation ? 'Attention' : 'Normal';
+      violationStatusEl.classList.toggle('alert', hasViolation);
+    }
+
+    function raiseClientViolation(type, note, cooldownMs = 3000) {
+      if (examEnded) {
+        return;
+      }
+      const nowTs = Date.now();
+      const lastTs = recentViolationAt[type] || 0;
+      if (nowTs - lastTs < cooldownMs) {
+        return;
+      }
+      recentViolationAt[type] = nowTs;
+
+      if (!Object.prototype.hasOwnProperty.call(violationCounters, type)) {
+        violationCounters[type] = 0;
+      }
+      violationCounters[type] += 1;
+      const now = new Date().toLocaleTimeString();
+      const msg = note ? `[${now}] ${type}: ${note}` : `[${now}] ${type}`;
+      addReportEntry(msg);
+      updateTotals();
+
+      if (type === 'tab_hidden' || type === 'window_blur' || type === 'fullscreen_exit') {
+        showWarningToast('Warning: Stay on the exam screen. Further navigation attempts will reduce trust score.');
+      }
+    }
+
+    function renderQuestion() {
+      const q = questions[currentQuestionIndex];
+      const selected = answers[currentQuestionIndex];
+
+      questionStepEl.textContent = `Question ${currentQuestionIndex + 1} of ${questions.length}`;
+      questionHostEl.innerHTML = `
+        <p>${currentQuestionIndex + 1}. ${q.text}</p>
+        ${q.options.map((opt, idx) => `
+          <label>
+            <input type="radio" name="active_question" value="${idx}" ${selected === idx ? 'checked' : ''} /> ${opt}
+          </label>
+        `).join('')}
+      `;
+
+      const radios = questionHostEl.querySelectorAll('input[type="radio"]');
+      radios.forEach((radio) => {
+        radio.addEventListener('change', (event) => {
+          answers[currentQuestionIndex] = Number(event.target.value);
+          updateQuestionStats();
+        });
+      });
+
+      prevBtn.disabled = currentQuestionIndex === 0;
+      nextBtn.disabled = currentQuestionIndex === questions.length - 1;
+    }
+
+    function updateQuestionStats() {
+      const attempted = answers.filter((ans) => ans !== null).length;
+      const unanswered = questions.length - attempted;
+      attemptedCountEl.textContent = attempted;
+      unansweredCountEl.textContent = unanswered;
+    }
+
+    function formatTime(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+      const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+      return `${minutes}:${seconds}`;
+    }
+
+    function setExamControlsDisabled(disabled) {
+      prevBtn.disabled = disabled || currentQuestionIndex === 0;
+      nextBtn.disabled = disabled || currentQuestionIndex === questions.length - 1;
+      endExamBtn.disabled = disabled;
+      const radios = questionHostEl.querySelectorAll('input[type="radio"]');
+      radios.forEach((radio) => {
+        radio.disabled = disabled;
+      });
+    }
+
+    function endExam(reason) {
+      if (examEnded) return;
+      examEnded = true;
+      if (timerId) {
+        clearInterval(timerId);
+      }
+      if (monitorIntervalId) {
+        clearInterval(monitorIntervalId);
+      }
+      setExamControlsDisabled(true);
+
+      const answered = answers.filter((ans) => ans !== null).length;
+      const unanswered = questions.length - answered;
+      const violations = totalViolationCount();
+      const url = `/thank_you?username=${encodeURIComponent(examUsername)}&answered=${answered}&unanswered=${unanswered}&violations=${violations}`;
+      window.location.href = url;
+    }
+
+    function startExamTimer() {
+      timerEl.textContent = formatTime(remainingSeconds);
+      timerId = setInterval(() => {
+        if (examEnded) return;
+        remainingSeconds -= 1;
+        timerEl.textContent = formatTime(Math.max(remainingSeconds, 0));
+        if (remainingSeconds <= 0) {
+          endExam('time_up');
+        }
+      }, 1000);
+    }
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+      webcam.srcObject = stream;
+      await webcam.play();
+    }
+
+    function guardNavigationAndFocus() {
+      history.pushState(null, '', window.location.href);
+      window.addEventListener('popstate', () => {
+        history.pushState(null, '', window.location.href);
+        raiseClientViolation('navigation_attempt', 'Back navigation blocked');
+      });
+
+      window.addEventListener('beforeunload', (event) => {
+        if (examEnded) return;
+        event.preventDefault();
+        event.returnValue = '';
+        raiseClientViolation('reload_or_close_attempt', 'Tried to reload or close tab');
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          raiseClientViolation('tab_hidden', 'Tab hidden or switched');
+        }
+      });
+
+      window.addEventListener('blur', () => {
+        raiseClientViolation('window_blur', 'Lost focus');
+      });
+
+      document.addEventListener('fullscreenchange', () => {
+        if (!examEnded && !document.fullscreenElement) {
+          raiseClientViolation('fullscreen_exit', 'Exited fullscreen');
+        }
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (examEnded) {
+          return;
+        }
+        const isReload = event.key === 'F5' || (event.ctrlKey && event.key.toLowerCase() === 'r');
+        const isCloseTab = event.ctrlKey && event.key.toLowerCase() === 'w';
+        const isBackNav = event.altKey && event.key === 'ArrowLeft';
+        if (isReload || isCloseTab || isBackNav) {
+          event.preventDefault();
+          raiseClientViolation('navigation_attempt', 'Keyboard navigation blocked');
+        }
+      });
+    }
+
+    async function analyzeFrame() {
+      if (examEnded) return;
+      if (!webcam.videoWidth || !webcam.videoHeight) return;
+
+      canvas.width = webcam.videoWidth;
+      canvas.height = webcam.videoHeight;
+      ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+      const image = canvas.toDataURL('image/jpeg', 0.75);
+
+      const response = await fetch('/analyze_frame', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, username: examUsername }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Frame analysis failed');
+      }
+
+      const data = await response.json();
+      const violations = data.violations || [];
+      if (violations.length) {
+        const now = new Date().toLocaleTimeString();
+        violations.forEach((violation) => {
+          if (!Object.prototype.hasOwnProperty.call(violationCounters, violation)) {
+            violationCounters[violation] = 0;
+          }
+          violationCounters[violation] += 1;
+          addReportEntry(`[${now}] ${violation}`);
+        });
+        updateTotals();
+      }
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      panel.classList.toggle('hidden');
+    });
+
+    prevBtn.addEventListener('click', () => {
+      if (examEnded) return;
+      if (currentQuestionIndex > 0) {
+        currentQuestionIndex -= 1;
+        renderQuestion();
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (examEnded) return;
+      if (currentQuestionIndex < questions.length - 1) {
+        currentQuestionIndex += 1;
+        renderQuestion();
+      }
+    });
+
+    endExamBtn.addEventListener('click', () => {
+      endExam('manual');
+    });
+
+    async function run() {
+      updateTotals();
+      renderQuestion();
+      updateQuestionStats();
+      setExamControlsDisabled(false);
+      guardNavigationAndFocus();
+      startExamTimer();
+
+      if (!fromSetup) {
+        showWarningToast('Exam should be opened via Screen Share Setup page.');
+      }
+
+      await startCamera();
+      monitorIntervalId = setInterval(async () => {
+        try {
+          await analyzeFrame();
+        } catch (err) {
+          raiseClientViolation('monitor_error', err.message, 2000);
+        }
+      }, 1000);
+    }
+
+    run().catch((err) => {
+      raiseClientViolation('monitor_error', err.message, 0);
+    });
+  </script>
+</body>
+</html>

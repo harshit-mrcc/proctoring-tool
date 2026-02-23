@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proctoring Tool | Face Registration</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="registration-page">
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <a class="nav-link" href="/">Back</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Face Registration</h1>
+    <p class="subtitle">Capture 3 face samples and verify identity to continue.</p>
+
+    <section class="card">
+      <p class="subtitle">Candidate: <strong id="candidateText">{{ username }}</strong></p>
+
+      <div class="registration-grid">
+        <div class="video-box">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="captureCanvas" width="640" height="480" hidden></canvas>
+        </div>
+        <aside class="capture-previews">
+          <p class="preview-title">Captured Samples</p>
+          <div class="preview-slot">
+            <span>Front</span>
+            <img id="previewFront" alt="Front sample preview" />
+          </div>
+          <div class="preview-slot">
+            <span>Side 1</span>
+            <img id="previewSideOne" alt="First side sample preview" />
+          </div>
+          <div class="preview-slot">
+            <span>Side 2</span>
+            <img id="previewSideTwo" alt="Second side sample preview" />
+          </div>
+        </aside>
+      </div>
+
+      <div class="actions">
+        <button id="startBtn" class="btn btn-primary" disabled>Register and Verify</button>
+      </div>
+      <p id="statusText" class="status-text">Starting camera...</p>
+    </section>
+  </main>
+  <div id="registrationToast" class="warning-toast hidden"></div>
+
+  <script>
+    const webcam = document.getElementById('webcam');
+    const canvas = document.getElementById('captureCanvas');
+    const ctx = canvas.getContext('2d');
+    const statusText = document.getElementById('statusText');
+    const startBtn = document.getElementById('startBtn');
+    const previewFront = document.getElementById('previewFront');
+    const previewSideOne = document.getElementById('previewSideOne');
+    const previewSideTwo = document.getElementById('previewSideTwo');
+    const registrationToast = document.getElementById('registrationToast');
+    const candidateText = document.getElementById('candidateText');
+    const usernameFromServer = {{ username | tojson }};
+
+    let cameraReady = false;
+    let toastTimer = null;
+
+    function setStatus(message, isError = false) {
+      statusText.textContent = message;
+      statusText.classList.toggle('error', isError);
+    }
+
+    function showToast(message) {
+      registrationToast.textContent = message;
+      registrationToast.classList.remove('hidden');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        registrationToast.classList.add('hidden');
+      }, 3200);
+    }
+
+    function getCandidateProfile() {
+      try {
+        const raw = window.localStorage.getItem('candidate_profile');
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function getUsername() {
+      const profile = getCandidateProfile();
+      const localUsername = profile && typeof profile.username === 'string' ? profile.username.trim() : '';
+      const queryUsername = String(usernameFromServer || '').trim();
+      if (localUsername && queryUsername && localUsername.toLowerCase() !== queryUsername.toLowerCase()) {
+        return queryUsername;
+      }
+      return localUsername || queryUsername;
+    }
+
+    function captureFrame() {
+      if (!webcam.videoWidth || !webcam.videoHeight) {
+        throw new Error('Camera is not ready');
+      }
+      canvas.width = webcam.videoWidth;
+      canvas.height = webcam.videoHeight;
+      ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.8);
+    }
+
+    async function postJson(url, payload) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Request failed');
+      }
+      return data;
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function clearPreviews() {
+      previewFront.removeAttribute('src');
+      previewSideOne.removeAttribute('src');
+      previewSideTwo.removeAttribute('src');
+    }
+
+    function setPreview(index, imageData) {
+      const previewEls = [previewFront, previewSideOne, previewSideTwo];
+      previewEls[index].src = imageData;
+    }
+
+    async function checkRegistrationPose(image) {
+      return postJson('/registration_pose_check', { image });
+    }
+
+    async function waitForPoseSample(stepLabel, validator, timeoutMs = 12000) {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        const image = captureFrame();
+        const poseData = await checkRegistrationPose(image);
+        if (validator(poseData)) {
+          return { image, poseData };
+        }
+        setStatus(stepLabel);
+        await sleep(450);
+      }
+      throw new Error(`Could not capture ${stepLabel.toLowerCase()}. Try again with better lighting.`);
+    }
+
+    async function captureRegistrationFrames() {
+      clearPreviews();
+      const samples = [];
+
+      const front = await waitForPoseSample(
+        'Step 1/3: Look straight at camera',
+        (poseData) =>
+          poseData.face_count === 1 &&
+          poseData.sideways_score !== null &&
+          Math.abs(poseData.sideways_score) <= poseData.center_max
+      );
+      samples.push(front.image);
+      setPreview(0, front.image);
+
+      const sideOne = await waitForPoseSample(
+        'Step 2/3: Turn to one side',
+        (poseData) =>
+          poseData.face_count === 1 &&
+          poseData.sideways_score !== null &&
+          Math.abs(poseData.sideways_score) >= poseData.side_min
+      );
+      const sideOneSign = sideOne.poseData.sideways_score >= 0 ? 1 : -1;
+      samples.push(sideOne.image);
+      setPreview(1, sideOne.image);
+
+      const sideTwo = await waitForPoseSample(
+        'Step 3/3: Turn to the opposite side',
+        (poseData) =>
+          poseData.face_count === 1 &&
+          poseData.sideways_score !== null &&
+          Math.abs(poseData.sideways_score) >= poseData.side_min &&
+          (poseData.sideways_score >= 0 ? 1 : -1) !== sideOneSign
+      );
+      samples.push(sideTwo.image);
+      setPreview(2, sideTwo.image);
+
+      return samples;
+    }
+
+    async function enableCamera() {
+      if (cameraReady) {
+        return;
+      }
+      try {
+        setStatus('Starting camera...');
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        webcam.srcObject = stream;
+        await webcam.play();
+        cameraReady = true;
+        startBtn.disabled = false;
+        setStatus('Camera ready. Click Register and Verify.');
+      } catch (error) {
+        setStatus(`Camera error: ${error.message}`, true);
+        showToast(`Camera error: ${error.message}`);
+      }
+    }
+
+    async function startRegistration() {
+      const username = getUsername();
+      const profile = getCandidateProfile() || {};
+      if (!username) {
+        setStatus('Candidate information missing. Return to setup page.', true);
+        return;
+      }
+      if (!cameraReady) {
+        setStatus('Enable camera first.', true);
+        return;
+      }
+
+      try {
+        startBtn.disabled = true;
+        setStatus('Capturing registration samples...');
+        const images = await captureRegistrationFrames();
+        await postJson('/register_face', {
+          username,
+          first_name: String(profile.first_name || ''),
+          last_name: String(profile.last_name || ''),
+          email: String(profile.email || ''),
+          images,
+        });
+        setStatus('Registration complete. Verifying face...');
+        const image = captureFrame();
+        const data = await postJson('/verify_face', { username, image });
+        if (!data.match) {
+          setStatus(`Face mismatch. Similarity ${data.score.toFixed(3)} < ${data.threshold}.`, true);
+          return;
+        }
+        setStatus(`Verification passed (${data.score.toFixed(3)}). Opening proctor setup...`);
+        window.location.href = `/screen_share?username=${encodeURIComponent(username)}`;
+      } catch (error) {
+        setStatus(error.message, true);
+        showToast(error.message);
+      } finally {
+        startBtn.disabled = false;
+      }
+    }
+
+    startBtn.addEventListener('click', startRegistration);
+
+    const displayUsername = getUsername();
+    if (displayUsername) {
+      candidateText.textContent = displayUsername;
+    }
+
+    enableCamera();
+  </script>
+</body>
+</html>

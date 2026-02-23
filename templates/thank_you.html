@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Thank You</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <a class="nav-link" href="/">Home</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card summary-card">
+      <h1>Thank You</h1>
+      <p class="subtitle">Candidate: <strong>{{ username }}</strong></p>
+
+      <div class="summary-line">
+        <span>Total Answered</span>
+        <strong>{{ answered }}</strong>
+      </div>
+      <div class="summary-line">
+        <span>Total Unanswered</span>
+        <strong>{{ unanswered }}</strong>
+      </div>
+      <div class="summary-line">
+        <span>Total Violations</span>
+        <strong>{{ violations }}</strong>
+      </div>
+      <div class="summary-line trust">
+        <span>Trust Score</span>
+        <strong>{{ trust_score }} / 100</strong>
+      </div>
+
+      <p class="subtitle">Please close this tab.</p>
+    </section>
+  </main>
+</body>
+</html>
