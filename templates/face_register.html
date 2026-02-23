@@ -148,6 +148,9 @@
       while (Date.now() - started < timeoutMs) {
         const image = captureFrame();
         const poseData = await checkRegistrationPose(image);
+        if (poseData.face_count > 1) {
+          throw new Error('Multiple faces detected. Only the candidate must be visible during registration.');
+        }
         if (validator(poseData)) {
           return { image, poseData };
         }

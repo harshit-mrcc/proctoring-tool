@@ -67,6 +67,7 @@
   </main>
 
   <div id="warningToast" class="warning-toast hidden"></div>
+  <div id="fullscreenGate" class="warning-toast hidden"></div>
 
   <script>
     const examUsername = {{ username | tojson }};
@@ -91,6 +92,7 @@
     const attemptedCountEl = document.getElementById('attemptedCount');
     const unansweredCountEl = document.getElementById('unansweredCount');
     const warningToastEl = document.getElementById('warningToast');
+    const fullscreenGateEl = document.getElementById('fullscreenGate');
 
     const questions = [
       { text: 'Which data structure uses FIFO order?', options: ['Stack', 'Queue', 'Tree'] },
@@ -141,6 +143,24 @@
       }, 3200);
     }
 
+    function showFullscreenGate() {
+      fullscreenGateEl.innerHTML = `
+        <strong>Action Required:</strong> Enter fullscreen to continue the exam.
+        <br />
+        Leaving fullscreen, switching tabs, or handling external notifications may cancel your exam.
+        <br />
+        <button id="enterFullscreenBtn" class="btn btn-danger" style="margin-top: 10px;">Enter Fullscreen</button>
+      `;
+      fullscreenGateEl.classList.remove('hidden');
+      const btn = document.getElementById('enterFullscreenBtn');
+      return btn;
+    }
+
+    function hideFullscreenGate() {
+      fullscreenGateEl.classList.add('hidden');
+      fullscreenGateEl.innerHTML = '';
+    }
+
     function updateTotals() {
       const chips = Object.entries(violationCounters)
         .map(([name, count]) => `<span class="total-chip">${name}: ${count}</span>`)
@@ -186,8 +206,32 @@
       updateTotals();
 
       if (type === 'tab_hidden' || type === 'window_blur' || type === 'fullscreen_exit') {
-        showWarningToast('Warning: Stay on the exam screen. Further navigation attempts will reduce trust score.');
+        showWarningToast('Severe warning: tab switching, focus loss, or fullscreen exit may cancel your exam attempt.');
       }
+      if (type === 'navigation_attempt' || type === 'reload_or_close_attempt') {
+        showWarningToast('Severe warning: navigation/reload attempts may cancel your exam attempt.');
+      }
+    }
+
+    async function enforceFullscreenBeforeExam() {
+      if (document.fullscreenElement) {
+        hideFullscreenGate();
+        return;
+      }
+
+      const btn = showFullscreenGate();
+      await new Promise((resolve, reject) => {
+        const onClick = async () => {
+          try {
+            await document.documentElement.requestFullscreen();
+            hideFullscreenGate();
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        };
+        btn.addEventListener('click', onClick, { once: true });
+      });
     }
 
     function renderQuestion() {
@@ -291,17 +335,17 @@
 
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-          raiseClientViolation('tab_hidden', 'Tab hidden or switched');
+          raiseClientViolation('tab_hidden', 'Tab hidden/switched. This action can cancel your exam.');
         }
       });
 
       window.addEventListener('blur', () => {
-        raiseClientViolation('window_blur', 'Lost focus');
+        raiseClientViolation('window_blur', 'Window lost focus, possibly due to tab/app switch or notification interaction. This can cancel your exam.');
       });
 
       document.addEventListener('fullscreenchange', () => {
         if (!examEnded && !document.fullscreenElement) {
-          raiseClientViolation('fullscreen_exit', 'Exited fullscreen');
+          raiseClientViolation('fullscreen_exit', 'Fullscreen exited. This can cancel your exam.');
         }
       });
 
@@ -385,8 +429,10 @@
       guardNavigationAndFocus();
       startExamTimer();
 
+      await enforceFullscreenBeforeExam();
+
       if (!fromSetup) {
-        showWarningToast('Exam should be opened via Screen Share Setup page.');
+        showWarningToast('Exam should be opened from Screen Share Setup. Policy violations may cancel your exam.');
       }
 
       await startCamera();
