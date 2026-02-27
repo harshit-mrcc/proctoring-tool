@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin User Detail</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <div class="nav-actions">
+        <a class="nav-link" href="{{ url_for('admin_dashboard') }}">Dashboard</a>
+        <a class="nav-link" href="/admin/logout">Logout</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>User: {{ user.username }}</h1>
+      <p class="subtitle">Evidence snapshots captured on server-side violations.</p>
+      <div class="summary-line"><span>User Key</span><strong>{{ user_key }}</strong></div>
+      <div class="summary-line"><span>Name</span><strong>{{ user.first_name }} {{ user.last_name }}</strong></div>
+      <div class="summary-line"><span>Email</span><strong>{{ user.email or "-" }}</strong></div>
+      <div class="summary-line"><span>Stored Face Samples</span><strong>{{ user.signatures|length }}</strong></div>
+    </section>
+
+    <section class="card" style="margin-top: 12px;">
+      <h2>Violation Captures</h2>
+      {% if events %}
+      <div class="evidence-grid">
+        {% for event in events %}
+        <article class="evidence-item">
+          <img src="{{ event.image_url }}" alt="Violation capture" loading="lazy" />
+          <div class="evidence-meta">
+            <div><strong>Time:</strong> {{ event.timestamp }}</div>
+            <div><strong>Violations:</strong> {{ event.violations|join(', ') }}</div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="subtitle">No captured violations for this user yet.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

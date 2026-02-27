@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <div class="nav-actions">
+        <a class="nav-link" href="/">Setup</a>
+        <a class="nav-link" href="/admin/logout">Logout</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Admin Dashboard</h1>
+      <p class="subtitle">Registered users and captured violation evidence.</p>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Face Samples</th>
+              <th>Violations Captured</th>
+              <th>Last Violation (UTC)</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+            <tr>
+              <td>{{ user.username }}</td>
+              <td>{{ user.email or "-" }}</td>
+              <td>{{ user.samples }}</td>
+              <td>{{ user.violation_count }}</td>
+              <td>{{ user.last_violation or "-" }}</td>
+              <td><a class="btn" href="{{ url_for('admin_user_detail', user_key=user.key) }}">View</a></td>
+            </tr>
+            {% endfor %}
+            {% if not users %}
+            <tr>
+              <td colspan="6">No registered users found.</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

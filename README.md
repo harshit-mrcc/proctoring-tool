@@ -1,21 +1,27 @@
 # Proctoring Tool
 
-Python + Flask based web proctoring demo.
+Project now uses:
+- `backend/`: Flask + Python proctoring logic
+- `frontend/`: React + TypeScript + Tailwind CSS app (Vite)
 
-## Features
-- Detects `no_face`
-- Detects `multiple_faces`
-- Detects `looking_sideways`
-- Live violation report in browser
-
-## Setup
+## Backend setup
 ```bash
+cd backend
 pip install -r requirements.txt
-python proctor.py
+python app.py
 ```
 
-Open: http://127.0.0.1:5000
+Backend runs on `http://127.0.0.1:5000`.
+
+## Frontend setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend runs on `http://127.0.0.1:5173` and proxies selected API endpoints to the backend.
 
 ## Notes
-- Browser camera permission is required.
-- Sideways detection is estimated using face landmarks (nose vs eye-center offset).
+- Browser camera permission is required for proctoring flows.
+- Violation captures are saved under `backend/static/violation_captures/`.

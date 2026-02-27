@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screen Share Setup</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <a class="nav-link" href="/">Home</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card setup-card">
+      <h1>Final Proctor Setup</h1>
+      <p class="subtitle">Candidate: <strong>{{ username }}</strong></p>
+      <p class="gate-note">Share your entire screen. Screen content is not recorded.</p>
+      <button id="setupBtn" class="btn btn-primary">Enable and Continue</button>
+      <p id="setupStatus" class="status-text">Waiting to start setup...</p>
+    </section>
+  </main>
+  <div id="setupToast" class="warning-toast hidden"></div>
+
+  <script>
+    const username = {{ username | tojson }};
+    const setupBtn = document.getElementById('setupBtn');
+    const setupStatus = document.getElementById('setupStatus');
+    const setupToast = document.getElementById('setupToast');
+    let toastTimer = null;
+
+    function setStatus(message, isError = false) {
+      setupStatus.textContent = message;
+      setupStatus.classList.toggle('error', isError);
+    }
+
+    function showToast(message) {
+      setupToast.textContent = message;
+      setupToast.classList.remove('hidden');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        setupToast.classList.add('hidden');
+      }, 3600);
+    }
+
+    async function beginSetup() {
+      try {
+        setupBtn.disabled = true;
+        setStatus('Requesting screen share...');
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        const videoTrack = displayStream.getVideoTracks()[0];
+        const displaySurface = videoTrack ? videoTrack.getSettings().displaySurface : '';
+        if (displaySurface !== 'monitor') {
+          displayStream.getTracks().forEach((track) => track.stop());
+          setupBtn.disabled = false;
+          const warningMsg = 'Share your entire screen only. Window/tab share is not accepted.';
+          setStatus(warningMsg, true);
+          showToast(warningMsg);
+          return;
+        }
+        displayStream.getTracks().forEach((track) => track.stop());
+
+        setStatus('Setup complete. Opening exam in a new tab...');
+        const examUrl = `/exam?username=${encodeURIComponent(username)}&proctor=1`;
+        const examTab = window.open(examUrl, '_blank');
+        if (!examTab) {
+          setStatus('Popup blocked. Opening exam in current tab...', true);
+          showToast('Popup blocked. Allow popups for this site. Exam rules still apply.');
+          window.location.href = examUrl;
+          return;
+        }
+        showToast('Exam opened in a separate tab. Switching tabs or losing focus may cancel your exam.');
+        setStatus('Exam opened in a new tab. Continue there now.');
+      } catch (err) {
+        setupBtn.disabled = false;
+        setStatus(`Setup failed: ${err.message}`, true);
+        showToast(`Setup failed: ${err.message}`);
+      }
+    }
+
+    setupBtn.addEventListener('click', beginSetup);
+  </script>
+</body>
+</html>

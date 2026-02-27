@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Login</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="navbar">
+    <div class="nav-inner">
+      <div class="brand">Proctoring Tool</div>
+      <div class="nav-actions">
+        <a class="nav-link" href="/">Setup</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card admin-login-card">
+      <h1>Admin Login</h1>
+      <p class="subtitle">Sign in to view registered users and violation evidence.</p>
+      {% if error %}
+      <p class="status-text error">{{ error }}</p>
+      {% endif %}
+      <form method="post" class="admin-login-form">
+        <label for="password">Admin Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button class="btn btn-primary" type="submit">Login</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
